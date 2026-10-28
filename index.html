@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>NEONBLAST.IO - Cyber Tank Arena</title>
+  <meta name="description" content="High-intensity neon tank arena combat .io game. Evolve classes, upgrade stats, and battle AI bots and friends in WebRTC multiplayer!">
+  <meta name="theme-color" content="#0b0f19">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="NEONBLAST.IO - Cyber Tank Arena">
+  <meta property="og:description" content="Play the free cyber tank arena .io game! Upgrade stats, unlock tank evolutions, and dominate the leaderboard!">
+  <meta property="og:type" content="website">
+
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- PeerJS for Free WebRTC P2P Multiplayer (Zero-backend required) -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+  <!-- Game Canvas -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- Sound Toggle Button -->
+  <button id="sound-toggle" title="Toggle Sound (M)">🔊</button>
+
+  <!-- ========================================================================
+       MAIN MENU
+       ======================================================================== -->
+  <div id="main-menu">
+    <div class="menu-card">
+      <div class="title-container">
+        <h1>NEONBLAST.IO</h1>
+        <div class="subtitle">CYBER TANK COMBAT ARENA</div>
+      </div>
+
+      <div class="input-group">
+        <input type="text" id="nickname-input" placeholder="Enter Pilot Call-sign" maxlength="15" autofocus>
+      </div>
+
+      <div class="color-picker-container">
+        <div class="color-picker-label">CHOOSE VESSEL HUE</div>
+        <div class="color-options" id="color-options"></div>
+      </div>
+
+      <div class="button-group">
+        <button class="btn-primary" id="btn-play-solo">⚡ BATTLE ARENA (INSTANT)</button>
+        <button class="btn-secondary" id="btn-host-room">🌐 HOST MULTIPLAYER ROOM</button>
+        <button class="btn-secondary" id="btn-join-room">🔗 JOIN ROOM CODE</button>
+      </div>
+
+      <div class="controls-help">
+        <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp;|&nbsp; <kbd>Mouse</kbd> Aim &nbsp;|&nbsp; <kbd>Left Click / Space</kbd> Fire</p>
+        <p><kbd>E</kbd> Auto-Fire &nbsp;|&nbsp; <kbd>C</kbd> Auto-Spin &nbsp;|&nbsp; <kbd>1</kbd>-<kbd>8</kbd> Stat Upgrades</p>
+        <p style="margin-top: 4px; color: #4dabf7;">📱 Touch controls with dual virtual joysticks enabled on mobile!</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       IN-GAME HUD
+       ======================================================================== -->
+  <div id="hud-container" style="display: none;">
+    <!-- Top Center Progression -->
+    <div class="hud-top-center">
+      <div class="hud-badges">
+        <div class="badge" id="hud-level">Lv. 1</div>
+        <div class="badge" id="hud-class-name">BASIC TANK</div>
+        <div class="badge" id="hud-score">Score: 0</div>
+      </div>
+      <div class="xp-bar-container">
+        <div id="xp-fill"></div>
+      </div>
+    </div>
+
+    <!-- Top Right Leaderboard & Kill Feed -->
+    <div class="hud-top-right">
+      <div class="leaderboard-card">
+        <div class="leaderboard-title">LEADERBOARD</div>
+        <div id="leaderboard-list"></div>
+      </div>
+      <div id="kill-feed"></div>
+    </div>
+
+    <!-- Top Left Evolution Choices -->
+    <div id="evolution-container"></div>
+
+    <!-- Bottom Left Upgrade Table -->
+    <div class="hud-bottom-left">
+      <div id="stat-points-badge">+1 STAT POINT</div>
+      <div id="stat-upgrades"></div>
+    </div>
+
+    <!-- Bottom Right Minimap -->
+    <div class="hud-bottom-right">
+      <canvas id="minimap-canvas" width="130" height="130"></canvas>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       HOST ROOM MODAL
+       ======================================================================== -->
+  <div class="modal-overlay" id="host-modal">
+    <div class="modal-box">
+      <h2>MULTIPLAYER ROOM CREATED</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">Share this Room Code or link with friends to battle in the same arena:</p>
+      <div class="room-code-display" id="display-room-code">------</div>
+      <button class="btn-primary" id="btn-copy-room-link">📋 COPY SHAREABLE LINK</button>
+      <button class="btn-secondary" id="btn-close-host-modal">ENTER ARENA</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       JOIN ROOM MODAL
+       ======================================================================== -->
+  <div class="modal-overlay" id="join-modal">
+    <div class="modal-box">
+      <h2>ENTER ROOM CODE</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">Input your friend's 6-letter room code to connect via WebRTC:</p>
+      <div class="input-group">
+        <input type="text" id="join-room-input" placeholder="e.g. 7X9K2B" maxlength="6" style="text-transform: uppercase; font-size: 1.3rem; letter-spacing: 3px;">
+      </div>
+      <div id="join-error-msg" style="color: #ff0844; font-size: 0.85rem; display: none;"></div>
+      <button class="btn-primary" id="btn-confirm-join">CONNECT & PLAY</button>
+      <button class="btn-secondary" id="btn-cancel-join">CANCEL</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       DEATH / GAME OVER SCREEN
+       ======================================================================== -->
+  <div class="modal-overlay" id="death-screen">
+    <div class="modal-box">
+      <h2 style="color: #ff0844; font-size: 2.2rem; letter-spacing: 2px;">VESSEL DESTROYED</h2>
+      <div class="death-stats">
+        <div class="stat-item">
+          <span>Final Score</span>
+          <span id="death-score">0</span>
+        </div>
+        <div class="stat-item">
+          <span>Kills</span>
+          <span id="death-kills">0</span>
+        </div>
+        <div class="stat-item">
+          <span>Survival Time</span>
+          <span id="death-time">0s</span>
+        </div>
+      </div>
+      <button class="btn-primary" id="btn-respawn">⚡ RESPAWN IMMEDIATELY</button>
+      <button class="btn-secondary" id="btn-return-menu">MAIN MENU</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       APPLICATION SCRIPT ENTRY
+       ======================================================================== -->
+  <script type="module">
+    import { CONFIG } from './js/config.js';
+    import { GameEngine } from './js/game.js';
+    import { sound } from './js/audio.js';
+
+    // Initialize Game Engine
+    const game = new GameEngine();
+    game.start();
+
+    // DOM Elements
+    const nicknameInput = document.getElementById('nickname-input');
+    const colorOptionsContainer = document.getElementById('color-options');
+    const btnPlaySolo = document.getElementById('btn-play-solo');
+    const btnHostRoom = document.getElementById('btn-host-room');
+    const btnJoinRoom = document.getElementById('btn-join-room');
+    const soundToggle = document.getElementById('sound-toggle');
+
+    // Host modal elements
+    const hostModal = document.getElementById('host-modal');
+    const displayRoomCode = document.getElementById('display-room-code');
+    const btnCopyRoomLink = document.getElementById('btn-copy-room-link');
+    const btnCloseHostModal = document.getElementById('btn-close-host-modal');
+
+    // Join modal elements
+    const joinModal = document.getElementById('join-modal');
+    const joinRoomInput = document.getElementById('join-room-input');
+    const joinErrorMsg = document.getElementById('join-error-msg');
+    const btnConfirmJoin = document.getElementById('btn-confirm-join');
+    const btnCancelJoin = document.getElementById('btn-cancel-join');
+
+    // Death modal elements
+    const deathScreen = document.getElementById('death-screen');
+    const btnRespawn = document.getElementById('btn-respawn');
+    const btnReturnMenu = document.getElementById('btn-return-menu');
+
+    // State
+    let selectedColorIndex = 0;
+
+    // Load saved callsign from localStorage
+    const savedName = localStorage.getItem('neonblast_name');
+    if (savedName) nicknameInput.value = savedName;
+
+    // Render Color Swatches
+    CONFIG.PLAYER_COLORS.forEach((col, idx) => {
+      const swatch = document.createElement('div');
+      swatch.className = `color-swatch ${idx === 0 ? 'active' : ''}`;
+      swatch.style.background = `linear-gradient(135deg, ${col.body}, ${col.barrel})`;
+      swatch.title = col.name;
+      swatch.addEventListener('click', () => {
+        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        selectedColorIndex = idx;
+      });
+      colorOptionsContainer.appendChild(swatch);
+    });
+
+    function getPlayerName() {
+      const name = (nicknameInput.value.trim() || 'Pilot_' + Math.floor(Math.random() * 900 + 100));
+      localStorage.setItem('neonblast_name', name);
+      return name;
+    }
+
+    // Play Solo / Bot Arena
+    btnPlaySolo.addEventListener('click', () => {
+      game.startSoloGame(getPlayerName(), selectedColorIndex);
+    });
+
+    // Host Room
+    btnHostRoom.addEventListener('click', () => {
+      btnHostRoom.textContent = 'CONNECTING HOST...';
+      game.startHostGame(
+        getPlayerName(),
+        selectedColorIndex,
+        (roomCode) => {
+          btnHostRoom.textContent = '🌐 HOST MULTIPLAYER ROOM';
+          displayRoomCode.textContent = roomCode;
+          hostModal.style.display = 'flex';
+        },
+        (err) => {
+          btnHostRoom.textContent = '🌐 HOST MULTIPLAYER ROOM';
+          alert(err || 'Failed to start P2P Host.');
+        }
+      );
+    });
+
+    // Copy Room Link
+    btnCopyRoomLink.addEventListener('click', () => {
+      const code = displayRoomCode.textContent;
+      const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
+      navigator.clipboard.writeText(url).then(() => {
+        btnCopyRoomLink.textContent = '✓ LINK COPIED TO CLIPBOARD!';
+        setTimeout(() => {
+          btnCopyRoomLink.textContent = '📋 COPY SHAREABLE LINK';
+        }, 2500);
+      }).catch(() => {
+        prompt('Copy your room share link:', url);
+      });
+    });
+
+    btnCloseHostModal.addEventListener('click', () => {
+      hostModal.style.display = 'none';
+    });
+
+    // Join Room Modal
+    btnJoinRoom.addEventListener('click', () => {
+      joinModal.style.display = 'flex';
+      joinRoomInput.focus();
+    });
+
+    btnCancelJoin.addEventListener('click', () => {
+      joinModal.style.display = 'none';
+      joinErrorMsg.style.display = 'none';
+    });
+
+    btnConfirmJoin.addEventListener('click', () => {
+      const code = joinRoomInput.value.trim().toUpperCase();
+      if (!code || code.length < 4) {
+        joinErrorMsg.textContent = 'Please enter a valid room code.';
+        joinErrorMsg.style.display = 'block';
+        return;
+      }
+      joinErrorMsg.style.display = 'none';
+      btnConfirmJoin.textContent = 'CONNECTING...';
+
+      game.startJoinGame(
+        code,
+        getPlayerName(),
+        selectedColorIndex,
+        () => {
+          btnConfirmJoin.textContent = 'CONNECT & PLAY';
+          joinModal.style.display = 'none';
+        },
+        (err) => {
+          btnConfirmJoin.textContent = 'CONNECT & PLAY';
+          joinErrorMsg.textContent = err || 'Could not connect to host.';
+          joinErrorMsg.style.display = 'block';
+        }
+      );
+    });
+
+    // Death Screen actions
+    function respawnPlayer() {
+      deathScreen.style.display = 'none';
+      game.startSoloGame(getPlayerName(), selectedColorIndex);
+    }
+
+    btnRespawn.addEventListener('click', respawnPlayer);
+
+    btnReturnMenu.addEventListener('click', () => {
+      deathScreen.style.display = 'none';
+      game.toggleMenu(true);
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (deathScreen.style.display === 'flex' && (e.key === 'Enter' || e.code === 'Space')) {
+        respawnPlayer();
+      }
+    });
+
+    // Sound toggle
+    function updateSoundIcon() {
+      soundToggle.textContent = sound.isMuted ? '🔇' : '🔊';
+    }
+    updateSoundIcon();
+
+    soundToggle.addEventListener('click', () => {
+      sound.toggleMute();
+      updateSoundIcon();
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'm') {
+        sound.toggleMute();
+        updateSoundIcon();
+      }
+    });
+
+    // Auto-join from URL parameter '?room=CODE'
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomFromUrl = urlParams.get('room');
+    if (roomFromUrl) {
+      joinRoomInput.value = roomFromUrl.toUpperCase();
+      joinModal.style.display = 'flex';
+    }
+  </script>
+</body>
+</html>
