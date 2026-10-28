@@ -47,6 +47,14 @@
         <div class="color-options" id="color-options"></div>
       </div>
 
+      <div class="bot-count-container" style="margin: 6px 0 2px 0;">
+        <div class="color-picker-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span>ARENA BOTS (0 - 50)</span>
+          <span id="bot-count-label" style="color: var(--primary-cyan); font-weight: bold; font-size: 0.85rem;">20 BOTS</span>
+        </div>
+        <input type="range" id="bot-count-slider" min="0" max="50" value="20" step="1" style="width: 100%; accent-color: var(--primary-cyan); cursor: pointer;">
+      </div>
+
       <div class="button-group">
         <button class="btn-primary" id="btn-play-solo">⚡ BATTLE ARENA (INSTANT)</button>
         <button class="btn-secondary" id="btn-host-room">🌐 HOST MULTIPLAYER ROOM</button>
@@ -174,6 +182,23 @@
     const btnHostRoom = document.getElementById('btn-host-room');
     const btnJoinRoom = document.getElementById('btn-join-room');
     const soundToggle = document.getElementById('sound-toggle');
+    const botCountSlider = document.getElementById('bot-count-slider');
+    const botCountLabel = document.getElementById('bot-count-label');
+
+    function getBotCount() {
+      return parseInt(botCountSlider.value, 10);
+    }
+
+    botCountSlider.addEventListener('input', () => {
+      const val = getBotCount();
+      if (val === 0) {
+        botCountLabel.textContent = '0 (NO BOTS / SANDBOX)';
+      } else if (val === 50) {
+        botCountLabel.textContent = '50 (MAX MAYHEM)';
+      } else {
+        botCountLabel.textContent = `${val} BOTS`;
+      }
+    });
 
     // Host modal elements
     const hostModal = document.getElementById('host-modal');
@@ -226,7 +251,7 @@
 
     // Play Solo / Bot Arena
     btnPlaySolo.addEventListener('click', () => {
-      game.startSoloGame(getPlayerName(), selectedColorIndex);
+      game.startSoloGame(getPlayerName(), selectedColorIndex, getBotCount());
     });
 
     // Host Room
@@ -243,7 +268,8 @@
         (err) => {
           btnHostRoom.textContent = '🌐 HOST MULTIPLAYER ROOM';
           alert(err || 'Failed to start P2P Host.');
-        }
+        },
+        getBotCount()
       );
     });
 
@@ -305,7 +331,7 @@
     // Death Screen actions
     function respawnPlayer() {
       deathScreen.style.display = 'none';
-      game.startSoloGame(getPlayerName(), selectedColorIndex);
+      game.startSoloGame(getPlayerName(), selectedColorIndex, getBotCount());
     }
 
     btnRespawn.addEventListener('click', respawnPlayer);

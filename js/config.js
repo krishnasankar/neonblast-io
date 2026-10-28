@@ -14,7 +14,8 @@ export const CONFIG = {
 
   // Game loop & balance
   TICK_RATE: 60,
-  MAX_BOTS: 25,
+  DEFAULT_BOTS: 20,
+  MAX_BOTS: 50,
   MAX_SHAPES: 320,
   ALPHA_PENTAGON_COUNT: 2,
 

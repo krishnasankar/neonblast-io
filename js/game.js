@@ -83,6 +83,9 @@ export class GameEngine {
     // Spatial grid for broadphase collision
     this.shapeGrid = new SpatialGrid(200);
 
+    // Bot count setting
+    this.targetBotCount = CONFIG.DEFAULT_BOTS || 20;
+
     // Local Player reference
     this.localPlayer = null;
     this.gameState = 'MENU'; // 'MENU', 'PLAYING', 'DEAD'
@@ -108,17 +111,17 @@ export class GameEngine {
     this.canvas.style.height = `${window.innerHeight}px`;
   }
 
-  startSoloGame(playerName, colorIndex) {
+  startSoloGame(playerName, colorIndex, botCount = CONFIG.DEFAULT_BOTS) {
     this.network.disconnect();
-    this.initWorld(playerName, colorIndex);
+    this.initWorld(playerName, colorIndex, botCount);
     this.gameState = 'PLAYING';
     this.startTime = Date.now();
     this.toggleMenu(false);
   }
 
-  startHostGame(playerName, colorIndex, onReady, onError) {
+  startHostGame(playerName, colorIndex, onReady, onError, botCount = CONFIG.DEFAULT_BOTS) {
     this.network.disconnect();
-    this.initWorld(playerName, colorIndex);
+    this.initWorld(playerName, colorIndex, botCount);
     this.network.hostRoom(null, (code) => {
       this.gameState = 'PLAYING';
       this.startTime = Date.now();
@@ -138,7 +141,7 @@ export class GameEngine {
     }, onError);
   }
 
-  initWorld(playerName, colorIndex) {
+  initWorld(playerName, colorIndex, botCount = CONFIG.DEFAULT_BOTS) {
     this.players = [];
     this.shapes = [];
     this.bullets = [];
@@ -146,6 +149,7 @@ export class GameEngine {
     this.particles = [];
     this.floatingTexts = [];
     this.bots = [];
+    this.targetBotCount = (botCount !== undefined) ? botCount : (CONFIG.DEFAULT_BOTS || 20);
 
     // Create local player at random safe spawn
     const spawnX = Math.random() * (CONFIG.ARENA.WIDTH - 800) + 400;
@@ -200,7 +204,8 @@ export class GameEngine {
   }
 
   populateBots() {
-    const needed = CONFIG.MAX_BOTS - this.bots.length;
+    const needed = this.targetBotCount - this.bots.length;
+    if (needed <= 0) return;
     for (let i = 0; i < needed; i++) {
       const name = CONFIG.BOT_NAMES[Math.floor(Math.random() * CONFIG.BOT_NAMES.length)];
       const color = CONFIG.PLAYER_COLORS[Math.floor(Math.random() * CONFIG.PLAYER_COLORS.length)];
@@ -637,7 +642,7 @@ export class GameEngine {
     // Clean dead bots & respawn
     this.bots = this.bots.filter(b => !b.bot.isDead);
     this.players = this.players.filter(p => !p.isDead);
-    if (this.bots.length < CONFIG.MAX_BOTS) {
+    if (this.bots.length < this.targetBotCount) {
       this.populateBots();
     }
   }
