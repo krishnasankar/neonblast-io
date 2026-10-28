@@ -87,13 +87,21 @@ export class Entity {
     // Background
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.beginPath();
-    ctx.roundRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, 2);
+    if (ctx.roundRect) {
+      ctx.roundRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2, 2);
+    } else {
+      ctx.rect(barX - 1, barY - 1, barWidth + 2, barHeight + 2);
+    }
     ctx.fill();
 
     // Health Fill
     ctx.fillStyle = healthRatio > 0.5 ? '#00ff87' : healthRatio > 0.25 ? '#ffd43b' : '#ff0844';
     ctx.beginPath();
-    ctx.roundRect(barX, barY, barWidth * healthRatio, barHeight, 1.5);
+    if (ctx.roundRect) {
+      ctx.roundRect(barX, barY, Math.max(0, barWidth * healthRatio), barHeight, 1.5);
+    } else {
+      ctx.rect(barX, barY, Math.max(0, barWidth * healthRatio), barHeight);
+    }
     ctx.fill();
     ctx.restore();
   }

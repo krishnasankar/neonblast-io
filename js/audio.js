@@ -5,9 +5,12 @@
 class SoundEngine {
   constructor() {
     this.ctx = null;
-    this.isMuted = localStorage.getItem('neonblast_muted') === 'true';
+    let muted = false;
+    try {
+      muted = localStorage.getItem('neonblast_muted') === 'true';
+    } catch (e) {}
+    this.isMuted = muted;
     this.masterVolume = 0.35;
-    this.initAudioContext();
   }
 
   initAudioContext() {
@@ -18,21 +21,15 @@ class SoundEngine {
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      const resume = () => {
-        this.ctx.resume();
-        window.removeEventListener('click', resume);
-        window.removeEventListener('keydown', resume);
-        window.removeEventListener('touchstart', resume);
-      };
-      window.addEventListener('click', resume, { once: true });
-      window.addEventListener('keydown', resume, { once: true });
-      window.addEventListener('touchstart', resume, { once: true });
+      this.ctx.resume().catch(() => {});
     }
   }
 
   toggleMute() {
     this.isMuted = !this.isMuted;
-    localStorage.setItem('neonblast_muted', this.isMuted);
+    try {
+      localStorage.setItem('neonblast_muted', this.isMuted);
+    } catch (e) {}
     return this.isMuted;
   }
 

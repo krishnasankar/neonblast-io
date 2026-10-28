@@ -194,8 +194,10 @@
     let selectedColorIndex = 0;
 
     // Load saved callsign from localStorage
-    const savedName = localStorage.getItem('neonblast_name');
-    if (savedName) nicknameInput.value = savedName;
+    try {
+      const savedName = localStorage.getItem('neonblast_name');
+      if (savedName) nicknameInput.value = savedName;
+    } catch (e) {}
 
     // Render Color Swatches
     CONFIG.PLAYER_COLORS.forEach((col, idx) => {
@@ -213,7 +215,9 @@
 
     function getPlayerName() {
       const name = (nicknameInput.value.trim() || 'Pilot_' + Math.floor(Math.random() * 900 + 100));
-      localStorage.setItem('neonblast_name', name);
+      try {
+        localStorage.setItem('neonblast_name', name);
+      } catch (e) {}
       return name;
     }
 

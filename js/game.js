@@ -2,7 +2,7 @@
 // NEONBLAST.IO - Main Game Loop & Arena Simulation Engine
 // ============================================================================
 
-import { CONFIG } from '../config.js';
+import { CONFIG } from './config.js';
 import { Player } from './entities/Player.js';
 import { Shape } from './entities/Shape.js';
 import { Bullet } from './entities/Bullet.js';
