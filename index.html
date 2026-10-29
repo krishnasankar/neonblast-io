@@ -19,6 +19,25 @@
 
   <!-- PeerJS for Free WebRTC P2P Multiplayer (Zero-backend required) -->
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <script>
+    // Immediate checks and swatch binding (independent of ES modules)
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.location.protocol === 'file:') {
+        const warn = document.getElementById('file-protocol-warning');
+        if (warn) warn.style.display = 'block';
+      }
+
+      const swatches = document.querySelectorAll('.color-swatch');
+      swatches.forEach((swatch, idx) => {
+        swatch.addEventListener('click', () => {
+          swatches.forEach(s => s.classList.remove('active'));
+          swatch.classList.add('active');
+          window._selectedColorIndex = idx;
+        });
+      });
+    });
+  </script>
 </head>
 <body>
 
@@ -33,6 +52,13 @@
        ======================================================================== -->
   <div id="main-menu">
     <div class="menu-card">
+      <!-- Warning if opened directly via file:// -->
+      <div id="file-protocol-warning" style="display: none; background: rgba(255, 8, 68, 0.15); border: 1px solid #ff0844; border-radius: 12px; padding: 12px 14px; font-size: 0.85rem; color: #ff99aa; line-height: 1.45; text-align: left;">
+        ⚠️ <strong>Local File (file://) Detected:</strong><br>
+        Web browsers block ES6 game modules on <code>file://</code>.<br>
+        Double-click <strong>start-game.bat</strong> in the game folder, or run a local server (e.g. <code>npx serve</code>, VS Code Live Server) to play.
+      </div>
+
       <div class="title-container">
         <h1>NEONBLAST.IO</h1>
         <div class="subtitle">CYBER TANK COMBAT ARENA</div>
@@ -44,7 +70,15 @@
 
       <div class="color-picker-container">
         <div class="color-picker-label">CHOOSE VESSEL HUE</div>
-        <div class="color-options" id="color-options"></div>
+        <div class="color-options" id="color-options">
+          <div class="color-swatch active" data-index="0" title="Neon Cyan" style="background: linear-gradient(135deg, #00f2fe, #009ffd);"></div>
+          <div class="color-swatch" data-index="1" title="Neon Crimson" style="background: linear-gradient(135deg, #ff0844, #ff4e50);"></div>
+          <div class="color-swatch" data-index="2" title="Cyber Violet" style="background: linear-gradient(135deg, #b100ff, #7928ca);"></div>
+          <div class="color-swatch" data-index="3" title="Electric Lime" style="background: linear-gradient(135deg, #00ff87, #60efff);"></div>
+          <div class="color-swatch" data-index="4" title="Solar Amber" style="background: linear-gradient(135deg, #f6d365, #fda085);"></div>
+          <div class="color-swatch" data-index="5" title="Hyper Orange" style="background: linear-gradient(135deg, #ff5858, #f09819);"></div>
+          <div class="color-swatch" data-index="6" title="Cosmic Pink" style="background: linear-gradient(135deg, #f77062, #fe5196);"></div>
+        </div>
       </div>
 
       <div class="bot-count-container" style="margin: 6px 0 2px 0;">
@@ -227,19 +261,34 @@
       if (savedName) nicknameInput.value = savedName;
     } catch (e) {}
 
-    // Render Color Swatches
-    CONFIG.PLAYER_COLORS.forEach((col, idx) => {
-      const swatch = document.createElement('div');
-      swatch.className = `color-swatch ${idx === 0 ? 'active' : ''}`;
-      swatch.style.background = `linear-gradient(135deg, ${col.body}, ${col.barrel})`;
-      swatch.title = col.name;
-      swatch.addEventListener('click', () => {
-        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
-        swatch.classList.add('active');
-        selectedColorIndex = idx;
+    // Bind Color Swatches
+    const existingSwatches = colorOptionsContainer.querySelectorAll('.color-swatch');
+    if (existingSwatches.length > 0) {
+      existingSwatches.forEach((swatch, idx) => {
+        swatch.addEventListener('click', () => {
+          existingSwatches.forEach(s => s.classList.remove('active'));
+          swatch.classList.add('active');
+          selectedColorIndex = idx;
+          window._selectedColorIndex = idx;
+        });
       });
-      colorOptionsContainer.appendChild(swatch);
-    });
+      if (window._selectedColorIndex !== undefined) {
+        selectedColorIndex = window._selectedColorIndex;
+      }
+    } else {
+      CONFIG.PLAYER_COLORS.forEach((col, idx) => {
+        const swatch = document.createElement('div');
+        swatch.className = `color-swatch ${idx === 0 ? 'active' : ''}`;
+        swatch.style.background = `linear-gradient(135deg, ${col.body}, ${col.barrel})`;
+        swatch.title = col.name;
+        swatch.addEventListener('click', () => {
+          document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+          swatch.classList.add('active');
+          selectedColorIndex = idx;
+        });
+        colorOptionsContainer.appendChild(swatch);
+      });
+    }
 
     function getPlayerName() {
       const name = (nicknameInput.value.trim() || 'Pilot_' + Math.floor(Math.random() * 900 + 100));
@@ -322,8 +371,13 @@
         },
         (err) => {
           btnConfirmJoin.textContent = 'CONNECT & PLAY';
-          joinErrorMsg.textContent = err || 'Could not connect to host.';
-          joinErrorMsg.style.display = 'block';
+          if (game.gameState === 'PLAYING') {
+            alert(err || 'Disconnected from host.');
+            game.toggleMenu(true);
+          } else {
+            joinErrorMsg.textContent = err || 'Could not connect to host.';
+            joinErrorMsg.style.display = 'block';
+          }
         }
       );
     });
@@ -331,7 +385,13 @@
     // Death Screen actions
     function respawnPlayer() {
       deathScreen.style.display = 'none';
-      game.startSoloGame(getPlayerName(), selectedColorIndex, getBotCount());
+      if (game.network && game.network.mode === 'CLIENT') {
+        game.respawnClient(getPlayerName(), selectedColorIndex);
+      } else if (game.network && game.network.mode === 'HOST') {
+        game.respawnHost(getPlayerName(), selectedColorIndex);
+      } else {
+        game.startSoloGame(getPlayerName(), selectedColorIndex, getBotCount());
+      }
     }
 
     btnRespawn.addEventListener('click', respawnPlayer);

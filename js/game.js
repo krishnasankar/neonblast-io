@@ -132,6 +132,15 @@ export class GameEngine {
 
   startJoinGame(roomCode, playerName, colorIndex, onConnected, onError) {
     this.network.disconnect();
+    this.players = [];
+    this.shapes = [];
+    this.bullets = [];
+    this.drones = [];
+    this.particles = [];
+    this.floatingTexts = [];
+    this.bots = [];
+    this.localPlayer = null;
+
     const color = CONFIG.PLAYER_COLORS[colorIndex] || CONFIG.PLAYER_COLORS[0];
     this.network.joinRoom(roomCode, playerName, color, () => {
       this.gameState = 'PLAYING';
@@ -139,6 +148,32 @@ export class GameEngine {
       this.toggleMenu(false);
       if (onConnected) onConnected();
     }, onError);
+  }
+
+  respawnLocalPlayer(playerName, colorIndex) {
+    const spawnX = Math.random() * (CONFIG.ARENA.WIDTH - 800) + 400;
+    const spawnY = Math.random() * (CONFIG.ARENA.HEIGHT - 800) + 400;
+    const color = CONFIG.PLAYER_COLORS[colorIndex] || CONFIG.PLAYER_COLORS[0];
+    this.localPlayer = new Player(spawnX, spawnY, playerName || 'Hero', color, false, true);
+    this.players.push(this.localPlayer);
+    this.camera.x = this.localPlayer.x;
+    this.camera.y = this.localPlayer.y;
+    this.startTime = Date.now();
+  }
+
+  respawnHost(playerName, colorIndex) {
+    this.respawnLocalPlayer(playerName, colorIndex);
+    this.gameState = 'PLAYING';
+    const deathScreen = document.getElementById('death-screen');
+    if (deathScreen) deathScreen.style.display = 'none';
+  }
+
+  respawnClient(playerName, colorIndex) {
+    const color = CONFIG.PLAYER_COLORS[colorIndex] || CONFIG.PLAYER_COLORS[0];
+    this.network.sendRespawn(playerName, color);
+    this.gameState = 'PLAYING';
+    const deathScreen = document.getElementById('death-screen');
+    if (deathScreen) deathScreen.style.display = 'none';
   }
 
   initWorld(playerName, colorIndex, botCount = CONFIG.DEFAULT_BOTS) {
@@ -155,7 +190,7 @@ export class GameEngine {
     const spawnX = Math.random() * (CONFIG.ARENA.WIDTH - 800) + 400;
     const spawnY = Math.random() * (CONFIG.ARENA.HEIGHT - 800) + 400;
     const color = CONFIG.PLAYER_COLORS[colorIndex] || CONFIG.PLAYER_COLORS[0];
-    this.localPlayer = new Player(spawnX, spawnY, playerName || 'Hero', color, false);
+    this.localPlayer = new Player(spawnX, spawnY, playerName || 'Hero', color, false, true);
     this.players.push(this.localPlayer);
 
     // Initial camera placement
@@ -224,6 +259,9 @@ export class GameEngine {
   requestUpgrade(statId) {
     if (this.network.mode === 'CLIENT') {
       this.network.sendUpgrade(statId);
+      if (this.localPlayer) {
+        this.localPlayer.upgradeStat(statId);
+      }
     } else if (this.localPlayer) {
       this.localPlayer.upgradeStat(statId);
     }
@@ -232,6 +270,9 @@ export class GameEngine {
   requestEvolve(classKey) {
     if (this.network.mode === 'CLIENT') {
       this.network.sendEvolve(classKey);
+      if (this.localPlayer) {
+        this.localPlayer.evolve(classKey);
+      }
     } else if (this.localPlayer) {
       this.localPlayer.evolve(classKey);
     }
@@ -239,30 +280,39 @@ export class GameEngine {
 
   // Network peer handlers for Host
   addRemotePlayer(peerId, name, color) {
+    this.players = this.players.filter(p => p.id !== peerId);
     const x = Math.random() * (CONFIG.ARENA.WIDTH - 600) + 300;
     const y = Math.random() * (CONFIG.ARENA.HEIGHT - 600) + 300;
-    const player = new Player(x, y, name, color, false);
+    const player = new Player(x, y, name, color, false, false);
     player.id = peerId;
+    player.remoteMovement = { x: 0, y: 0 };
+    player.networkFiring = false;
+    player.networkRepelling = false;
+    player.lastInputTime = performance.now();
     this.players.push(player);
   }
 
   removeRemotePlayer(peerId) {
     this.players = this.players.filter(p => p.id !== peerId);
+    this.drones = this.drones.filter(d => !d.owner || d.owner.id !== peerId);
   }
 
   applyRemoteInput(peerId, input) {
     const p = this.players.find(x => x.id === peerId);
-    if (!p || p.isDead) return;
+    if (!p || p.isDead || !input) return;
 
     if (input.movement) {
-      p.vx += input.movement.x * p.speed * 0.35;
-      p.vy += input.movement.y * p.speed * 0.35;
+      p.remoteMovement = input.movement;
     }
     if (input.aimAngle !== undefined) {
       p.aimAngle = input.aimAngle;
     }
     p.networkFiring = !!input.isFiring;
     p.networkRepelling = !!input.isRepelling;
+    if (input.worldAim) {
+      p.remoteWorldAim = input.worldAim;
+    }
+    p.lastInputTime = performance.now();
   }
 
   applyRemoteUpgrade(peerId, statId) {
@@ -275,49 +325,199 @@ export class GameEngine {
     if (p) p.evolve(classKey);
   }
 
+  // Host: update all remote players (movement, firing, drones)
+  updateRemotePlayers(dt) {
+    const now = performance.now();
+    const spawnCallback = (item, isDrone = false) => {
+      if (isDrone) {
+        this.drones.push(item);
+      } else {
+        this.bullets.push(item);
+      }
+    };
+
+    for (const player of this.players) {
+      if (player === this.localPlayer || player.isBot || player.isDead) continue;
+
+      // Timeout safety: reset movement & firing if no input received recently
+      if (player.lastInputTime && now - player.lastInputTime > 600) {
+        player.remoteMovement = { x: 0, y: 0 };
+        player.networkFiring = false;
+      }
+
+      // Apply movement input
+      const mv = player.remoteMovement || { x: 0, y: 0 };
+      const accel = player.speed * 0.38;
+      player.vx += mv.x * accel * dt;
+      player.vy += mv.y * accel * dt;
+
+      // World aim target for drones
+      const worldAim = player.remoteWorldAim || {
+        x: player.x + Math.cos(player.aimAngle) * 300,
+        y: player.y + Math.sin(player.aimAngle) * 300
+      };
+
+      player.update(dt, spawnCallback, !!player.networkFiring, worldAim, !!player.networkRepelling);
+    }
+  }
+
   // Client mode: receiving authoritative snapshot from Host
   applyWorldSnapshot(snap) {
     if (!snap) return;
 
-    // Sync shapes
+    // Sync shapes (preserving existing instances for smooth animation)
+    const existingShapes = new Map(this.shapes.map(s => [s.id, s]));
     this.shapes = (snap.shapes || []).map(s => {
-      const shape = new Shape(s.x, s.y, s.typeKey);
+      let shape = s.id ? existingShapes.get(s.id) : null;
+      if (!shape) {
+        shape = new Shape(s.x, s.y, s.typeKey);
+        if (s.id) shape.id = s.id;
+      }
+      shape.x = s.x;
+      shape.y = s.y;
       shape.health = s.health;
       shape.maxHealth = s.maxHealth;
       shape.rotation = s.rotation;
       return shape;
     });
 
-    // Sync bullets
+    // Sync bullets (preserving existing instances for trails)
+    const existingBullets = new Map(this.bullets.map(b => [b.id, b]));
     this.bullets = (snap.bullets || []).map(b => {
+      const existing = b.id ? existingBullets.get(b.id) : null;
+      if (existing) {
+        existing.x = b.x;
+        existing.y = b.y;
+        existing.vx = b.vx;
+        existing.vy = b.vy;
+        existing.penetration = b.penetration;
+        return existing;
+      }
       const bullet = new Bullet(b.x, b.y, b.angle, b.speed, b.damage, b.penetration, b.radius, b.ownerId, b.color, b.glow);
+      if (b.id) bullet.id = b.id;
       bullet.vx = b.vx;
       bullet.vy = b.vy;
       return bullet;
     });
 
+    // Sync drones
+    const existingDrones = new Map(this.drones.map(d => [d.id, d]));
+    this.drones = (snap.drones || []).map(d => {
+      let drone = d.id ? existingDrones.get(d.id) : null;
+      if (!drone) {
+        drone = new Drone(d.x, d.y, { color: { body: d.color, glow: d.glow }, id: d.ownerId });
+        if (d.id) drone.id = d.id;
+      }
+      drone.x = d.x;
+      drone.y = d.y;
+      drone.angle = d.angle;
+      drone.radius = d.radius;
+      return drone;
+    });
+
+    const myId = this.network.peer ? this.network.peer.id : null;
+    const existingPlayers = new Map(this.players.map(p => [p.id, p]));
+    const snapLocal = (snap.players || []).find(p => p.id === myId);
+
+    // Local player death detection in client mode
+    if (this.localPlayer && !this.localPlayer.isDead && !snapLocal) {
+      this.localPlayer.isDead = true;
+      this.onLocalPlayerDeath();
+    }
+
     // Sync players
     this.players = (snap.players || []).map(p => {
-      const pl = new Player(p.x, p.y, p.name, p.color, p.isBot);
-      pl.id = p.id;
+      let pl = existingPlayers.get(p.id);
+      if (!pl) {
+        pl = new Player(p.x, p.y, p.name, p.color, p.isBot, p.id === myId);
+        pl.id = p.id;
+      }
+
+      pl.name = p.name;
+      pl.color = p.color;
       pl.level = p.level;
       pl.score = p.score;
-      pl.health = p.health;
-      pl.maxHealth = p.maxHealth;
-      pl.aimAngle = p.aimAngle;
-      pl.currentClassKey = p.currentClassKey;
-      pl.classDef = CONFIG.CLASSES[p.currentClassKey] || CONFIG.CLASSES.basic;
-      pl.stats = p.stats;
+      if (p.xp !== undefined) pl.xp = p.xp;
+      if (p.kills !== undefined) pl.kills = p.kills;
       pl.statPoints = p.statPoints;
+      pl.stats = p.stats;
+      pl.maxHealth = p.maxHealth;
+
+      if (p.id === myId) {
+        pl.isLocal = true;
+        if (pl.health > p.health) {
+          sound.playHit();
+        }
+        pl.health = p.health;
+
+        // Reconcile position smoothly towards host authority
+        const dx = p.x - pl.x;
+        const dy = p.y - pl.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq > 150 * 150) {
+          pl.x = p.x;
+          pl.y = p.y;
+          pl.vx = 0;
+          pl.vy = 0;
+        } else {
+          pl.x += dx * 0.35;
+          pl.y += dy * 0.35;
+        }
+      } else {
+        pl.isLocal = false;
+        pl.health = p.health;
+        pl.x = p.x;
+        pl.y = p.y;
+        pl.aimAngle = p.aimAngle;
+      }
+
+      if (pl.currentClassKey !== p.currentClassKey) {
+        pl.evolve(p.currentClassKey);
+      }
+
       return pl;
     });
 
-    // Rebind local player reference
-    const myId = this.network.peer ? this.network.peer.id : null;
-    this.localPlayer = this.players.find(p => p.id === myId) || this.localPlayer;
+    const hadLocal = !!this.localPlayer;
+    this.localPlayer = this.players.find(p => p.id === myId) || (snapLocal ? null : this.localPlayer);
+
+    // Initial camera placement on join
+    if (!hadLocal && this.localPlayer) {
+      this.camera.x = this.localPlayer.x;
+      this.camera.y = this.localPlayer.y;
+    }
 
     // Leaderboard
     this.hud.update(this.localPlayer, snap.leaderboard);
+  }
+
+  // Smoothly update client entities between snapshots
+  updateClientEntities(dt) {
+    for (const b of this.bullets) {
+      b.update(dt);
+    }
+    this.bullets = this.bullets.filter(b => !b.isDead);
+
+    for (const s of this.shapes) {
+      s.update(dt);
+    }
+
+    for (const d of this.drones) {
+      d.update(dt);
+    }
+
+    for (const p of this.particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= p.decay * dt;
+    }
+    this.particles = this.particles.filter(p => p.life > 0);
+
+    for (const ft of this.floatingTexts) {
+      ft.y -= 0.8 * dt;
+      ft.life -= 0.02 * dt;
+    }
+    this.floatingTexts = this.floatingTexts.filter(ft => ft.life > 0);
   }
 
   // Main Loop
@@ -339,25 +539,82 @@ export class GameEngine {
 
     // 1. Client mode networking
     if (this.network.mode === 'CLIENT') {
-      const screenX = window.innerWidth / 2;
-      const screenY = window.innerHeight / 2;
+      const screenX = this.localPlayer ? window.innerWidth / 2 + (this.localPlayer.x - this.camera.x) * this.camera.zoom : window.innerWidth / 2;
+      const screenY = this.localPlayer ? window.innerHeight / 2 + (this.localPlayer.y - this.camera.y) * this.camera.zoom : window.innerHeight / 2;
       const movement = this.input.getMovement();
       const aimAngle = this.input.getAimAngle(screenX, screenY);
       const isFiring = this.input.isFiring();
       const isRepelling = this.input.isRepelling();
 
-      this.network.sendInput({ movement, aimAngle, isFiring, isRepelling });
+      const worldAim = {
+        x: this.camera.x + (this.input.mouse.x - window.innerWidth / 2) / this.camera.zoom,
+        y: this.camera.y + (this.input.mouse.y - window.innerHeight / 2) / this.camera.zoom
+      };
 
-      // Camera smoothly tracks local player
-      if (this.localPlayer) {
+      this.network.sendInput({ movement, aimAngle, isFiring, isRepelling, worldAim });
+
+      if (this.localPlayer && !this.localPlayer.isDead) {
+        // Client-side prediction for instant responsive movement
+        const accel = this.localPlayer.speed * 0.38;
+        this.localPlayer.vx += movement.x * accel * dt;
+        this.localPlayer.vy += movement.y * accel * dt;
+        this.localPlayer.x += this.localPlayer.vx * dt;
+        this.localPlayer.y += this.localPlayer.vy * dt;
+        this.localPlayer.vx *= Math.pow(this.localPlayer.friction, dt);
+        this.localPlayer.vy *= Math.pow(this.localPlayer.friction, dt);
+        this.localPlayer.constrainToBounds();
+        this.localPlayer.aimAngle = aimAngle;
+
+        // Camera follow
+        this.camera.targetZoom = 1 / (this.localPlayer.zoom || 1.0);
+        this.camera.zoom += (this.camera.targetZoom - this.camera.zoom) * 0.05;
         this.camera.x += (this.localPlayer.x - this.camera.x) * 0.1;
         this.camera.y += (this.localPlayer.y - this.camera.y) * 0.1;
+
+        // Update local barrel timers & recoil recovery for responsive visuals & audio
+        const reloadStatBonus = 1 + this.localPlayer.stats.reload * 0.12;
+        for (let i = 0; i < this.localPlayer.barrelTimers.length; i++) {
+          if (this.localPlayer.barrelTimers[i] > 0) {
+            this.localPlayer.barrelTimers[i] = Math.max(0, this.localPlayer.barrelTimers[i] - reloadStatBonus * dt);
+          }
+          if (this.localPlayer.barrelRecoil[i] > 0) {
+            this.localPlayer.barrelRecoil[i] = Math.max(0, this.localPlayer.barrelRecoil[i] - 0.15 * dt);
+          }
+        }
+
+        if (isFiring) {
+          const barrels = this.localPlayer.classDef.barrels || [];
+          for (let i = 0; i < barrels.length; i++) {
+            const b = barrels[i];
+            if (b.isDroneSpawnerBarrel) continue;
+            if (this.localPlayer.barrelTimers[i] <= 0) {
+              this.localPlayer.barrelTimers[i] = b.reloadTime;
+              this.localPlayer.barrelRecoil[i] = 1.0;
+
+              // Recoil kick impulse on local tank
+              const spreadOffset = (Math.random() - 0.5) * (b.spread || 0.04);
+              const finalAngle = this.localPlayer.aimAngle + (b.angle || 0) + spreadOffset;
+              const recoilMag = (b.recoil || 0.15) * 12;
+              this.localPlayer.vx -= Math.cos(finalAngle) * recoilMag;
+              this.localPlayer.vy -= Math.sin(finalAngle) * recoilMag;
+
+              const isHeavy = !!b.bulletRadius && b.bulletRadius > 15;
+              sound.playShoot(1.0, isHeavy);
+            }
+          }
+        }
       }
+
+      // Smoothly update bullets and particles on client between snapshots
+      this.updateClientEntities(dt);
       return;
     }
 
     // 2. Authoritative Loop (SOLO or HOST)
     this.updateLocalPlayer(dt);
+    if (this.network.mode === 'HOST') {
+      this.updateRemotePlayers(dt);
+    }
     this.updateBots(dt);
     this.updateEntities(dt);
     this.handleCollisions();
@@ -653,10 +910,11 @@ export class GameEngine {
       .sort((a, b) => b.score - a.score);
   }
 
-  broadcastWorldState(leaderboard) {
-    const snapshot = {
+  getSnapshot(leaderboard = this.getLeaderboardData()) {
+    return {
       leaderboard,
       shapes: this.shapes.map(s => ({
+        id: s.id,
         x: Math.round(s.x),
         y: Math.round(s.y),
         typeKey: s.typeKey,
@@ -665,6 +923,7 @@ export class GameEngine {
         rotation: +(s.rotation.toFixed(2))
       })),
       bullets: this.bullets.map(b => ({
+        id: b.id,
         x: Math.round(b.x),
         y: Math.round(b.y),
         vx: +b.vx.toFixed(1),
@@ -678,6 +937,16 @@ export class GameEngine {
         color: b.color,
         glow: b.glow
       })),
+      drones: this.drones.map(d => ({
+        id: d.id,
+        x: Math.round(d.x),
+        y: Math.round(d.y),
+        angle: +d.angle.toFixed(2),
+        radius: d.radius,
+        color: d.color,
+        glow: d.glow,
+        ownerId: d.owner ? d.owner.id : null
+      })),
       players: this.players.map(p => ({
         id: p.id,
         name: p.name,
@@ -687,6 +956,8 @@ export class GameEngine {
         y: Math.round(p.y),
         level: p.level,
         score: Math.round(p.score),
+        xp: Math.round(p.xp || 0),
+        kills: p.kills || 0,
         health: Math.round(p.health),
         maxHealth: p.maxHealth,
         aimAngle: +p.aimAngle.toFixed(2),
@@ -695,6 +966,10 @@ export class GameEngine {
         statPoints: p.statPoints
       }))
     };
+  }
+
+  broadcastWorldState(leaderboard) {
+    const snapshot = this.getSnapshot(leaderboard);
     this.network.broadcastSnapshot(snapshot);
   }
 

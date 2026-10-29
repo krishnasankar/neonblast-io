@@ -9,11 +9,12 @@ import { Drone } from './Drone.js';
 import { sound } from '../audio.js';
 
 export class Player extends Entity {
-  constructor(x, y, name = 'Pilot', color = null, isBot = false) {
+  constructor(x, y, name = 'Pilot', color = null, isBot = false, isLocal = false) {
     super(x, y, 22, 5);
 
     this.name = name;
     this.isBot = isBot;
+    this.isLocal = isLocal;
     this.color = color || CONFIG.PLAYER_COLORS[0];
 
     // Progression
@@ -116,7 +117,7 @@ export class Player extends Entity {
     if (leveledUp) {
       this.recomputeStats();
       this.health = this.maxHealth; // Full heal on level-up
-      if (!this.isBot) {
+      if (this.isLocal) {
         sound.playLevelUp();
       }
     }
@@ -130,7 +131,7 @@ export class Player extends Entity {
     this.stats[statId]++;
     this.statPoints--;
     this.recomputeStats();
-    if (!this.isBot) {
+    if (this.isLocal) {
       sound.playUpgradeClick();
     }
     return true;
@@ -158,7 +159,7 @@ export class Player extends Entity {
     this.radius = this.bodyRadius;
     this.initBarrels();
     this.recomputeStats();
-    if (!this.isBot) {
+    if (this.isLocal) {
       sound.playLevelUp();
     }
     return true;
@@ -261,7 +262,7 @@ export class Player extends Entity {
         bulletSpawnCallback(bullet);
 
         // Sound effect
-        if (!this.isBot) {
+        if (this.isLocal) {
           const isHeavy = !!b.bulletRadius && b.bulletRadius > 15;
           sound.playShoot(1.0, isHeavy);
         }

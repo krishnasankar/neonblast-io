@@ -84,6 +84,13 @@ export class InputManager {
     // Prevent context menu in canvas to allow right-click abilities
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+    // Window blur reset
+    window.addEventListener('blur', () => {
+      this.keys = {};
+      this.mouse.isDown = false;
+      this.mouse.rightDown = false;
+    });
+
     // Touch support (Mobile)
     this.bindTouchEvents();
   }

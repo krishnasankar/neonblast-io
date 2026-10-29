@@ -95,8 +95,12 @@ export class NetworkManager {
   }
 
   handleClientData(peerId, data) {
-    if (data.type === 'JOIN') {
+    if (data.type === 'JOIN' || data.type === 'RESPAWN') {
       this.game.addRemotePlayer(peerId, data.name, data.color);
+      const conn = this.connections.get(peerId);
+      if (conn && conn.open && typeof this.game.getSnapshot === 'function') {
+        conn.send({ type: 'SNAPSHOT', snapshot: this.game.getSnapshot() });
+      }
     } else if (data.type === 'INPUT') {
       this.game.applyRemoteInput(peerId, data.input);
     } else if (data.type === 'UPGRADE') {
@@ -201,10 +205,40 @@ export class NetworkManager {
   // Client: Send local inputs to host
   sendInput(inputState) {
     if (this.mode !== 'CLIENT' || !this.hostConnection || !this.hostConnection.open) return;
-    this.hostConnection.send({
-      type: 'INPUT',
-      input: inputState
-    });
+
+    const now = performance.now();
+    const firingChanged = this.lastInputState && (this.lastInputState.isFiring !== inputState.isFiring || this.lastInputState.isRepelling !== inputState.isRepelling);
+
+    // Send at most every 20ms (~50 updates/sec), or immediately on fire/repel state change
+    if (!firingChanged && this.lastInputSend && (now - this.lastInputSend < 20)) {
+      return;
+    }
+
+    this.lastInputSend = now;
+    this.lastInputState = { isFiring: inputState.isFiring, isRepelling: inputState.isRepelling };
+
+    try {
+      this.hostConnection.send({
+        type: 'INPUT',
+        input: inputState
+      });
+    } catch (e) {
+      console.warn('Failed to send input:', e);
+    }
+  }
+
+  // Client: Send respawn request to host
+  sendRespawn(playerName, playerColor) {
+    if (this.mode !== 'CLIENT' || !this.hostConnection || !this.hostConnection.open) return;
+    try {
+      this.hostConnection.send({
+        type: 'RESPAWN',
+        name: playerName,
+        color: playerColor
+      });
+    } catch (e) {
+      console.warn('Failed to send respawn:', e);
+    }
   }
 
   // Client: Send stat upgrade
